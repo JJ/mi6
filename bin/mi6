@@ -2,8 +2,12 @@
 use v6;
 use App::Mi6;
 
+my %*SUB-MAIN-OPTS = :named-anywhere;
 my $app = App::Mi6.new;
 
+multi MAIN("version") {
+    say $app.^ver;
+}
 multi MAIN("new", $module) {
     $app.cmd("new", $module);
 }
@@ -13,36 +17,77 @@ multi MAIN("build") {
 multi MAIN("test", *@file, Bool :v(:$verbose), Int :j(:$jobs)) {
     $app.cmd("test", @file, :$verbose, :$jobs);
 }
-multi MAIN("release") {
-    $app.cmd("release");
+multi MAIN("release", Bool :$keep) {
+    $app.cmd("release", :$keep);
 }
 multi MAIN("dist") {
     $app.cmd("dist");
 }
 multi MAIN("upload") {
-    $app.cmd("upload");
+    die "`mi6 upload` is removed, please execute `mi6 release` instead.\n";
 }
-multi MAIN("help") { usage }
-multi MAIN(:h(:$help)!) { usage}
-sub usage() {
+multi MAIN("help") {
+    USAGE();
+}
+multi MAIN(:h(:$help)!) {
+    USAGE();
+}
+sub USAGE {
     require Pod::To::Text;
     ::("Pod::To::Text").render($=pod).say;
+    exit 1;
 }
 
 =begin pod
 
 =head1 USAGE
 
-  > mi6 new Foo::Bar # create Foo-Bar distribution
-  > mi6 build        # build the distribution, and re-generate README.md/META6.json
-  > mi6 test         # run tests
-  > mi6 release      # show release steps
-  > mi6 dist         # make distribution tarball
-  > mi6 upload       # upload distribution tarball to CPAN
+  $ mi6 new Foo::Bar # create Foo-Bar distribution
+  $ mi6 build        # build the distribution, and re-generate README.md/META6.json
+  $ mi6 test         # run tests
+  $ mi6 release      # release your distribution tarball to CPAN
+  $ mi6 version      # show mi6 version
+  $ mi6 help         # show this help
 
-  Examples:
-  > mi6 --verbose test    # run tests with verbose mode (alias: -v)
-  > mi6 --jobs=N  test    # run N test jobs in parallel (alias: -j)
-  > mi6 test t/02-test.t  # run specific test
+  Details:
+
+  $ mi6 new Foo::Bar
+    Create Foo-Bar distribution
+
+    Options:
+     (none)
+
+  $ mi6 build
+    Build the distribution, and re-generate README.md/META6.json.
+    Here 'build' means if Build.pm is present, then execute it, otherwise nothing happens.
+
+    Options:
+     (none)
+
+  $ mi6 test [test files/directory]
+    Run tests by `PERL6LIB=lib prove -e perl6 t`
+
+    Options:
+     -v, --verbose   execute prove with -v option
+     -j, --jobs=N    execute prove with -j=N option
+
+  $ mi6 release
+    Create tarball for your distribution, and release it to CPAN.
+    You should prepare ~/.pause file before releasing.
+
+    Options:
+     -k, --keep   do not delete local tarball after releasing it to CPAN
+
+  $ mi6 version
+    Show mi6 version
+
+    Options:
+     (none)
+
+  $ mi6 help, mi6 --help
+    Show this help
+
+    Options:
+     -h, --help   show this help
 
 =end pod

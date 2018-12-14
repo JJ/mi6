@@ -38,10 +38,17 @@ my $tempdir = tempdir;
 }
 {
     temp $*CWD = $tempdir.IO;
+    temp %*ENV<HOME> = $tempdir;
+    $*HOME.add('.pause').spurt: q:to/EOF/;
+    user SOMEBODY
+    password this-is-secret
+    EOF
+
     $r = mi6 "new", "Hello";
     chdir "Hello";
     my $meta = from-json( "META6.json".IO.slurp );
     is $meta<description>, "blah blah blah";
+    is $meta<auth>, "cpan:SOMEBODY";
     "lib/Hello.pm6".IO.spurt: q:to/EOF/;
     use v6;
     unit module Hello;
@@ -66,6 +73,31 @@ my $tempdir = tempdir;
     chdir "Hoge-Bar";
     mi6 "dist";
     ok "Hoge-Bar-0.0.1.tar.gz".IO.f;
+}
+{
+    temp $*CWD = $tempdir.IO;
+    mi6 "new", "Hello::World";
+    chdir "Hello-World";
+    "lib/Hello/World2.pm6".IO.spurt("");
+    "lib/Hello/World3.pm6".IO.spurt("");
+    "lib/Hello/World4.pm6".IO.spurt("");
+    "lib/Hello/World5.pm6".IO.spurt("");
+    "dist.ini".IO.spurt: q:to/EOF/;
+    name = Hello-World
+    [PruneFiles]
+    filename = lib/Hello/World5.pm6
+    [MetaNoIndex]
+    filename = lib/Hello/World3.pm6
+    filename = lib/Hello/World4.pm6
+    EOF
+    run "git", "add", ".";
+
+    mi6 "build";
+    my $meta = from-json( "META6.json".IO.slurp );
+    is $meta<provides>, {
+        "Hello::World" => "lib/Hello/World.pm6",
+        "Hello::World2" => "lib/Hello/World2.pm6",
+    };
 }
 
 done-testing;

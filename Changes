@@ -1,0 +1,48 @@
+Revision history for App-Mi6
+
+{{$NEXT}}
+
+0.2.3  2018-11-04T07:24:08+09:00
+  - Make upload prompt clearer (uzluisf #59)
+
+0.2.2  2018-10-27T22:50:28+09:00
+  - Fix doc (ccworld1000 #58)
+
+0.2.1  2018-10-14T21:40:33+09:00
+  - If NO_COLOR environment variable is set, disable color output (jmaslak #56)
+
+0.2.0  2018-10-02T08:32:45+09:00
+  - Add documentation on format of .pause (jmaslak #55)
+
+0.1.9  2018-09-04T22:56:40+09:00
+  - Introduce MetaNoIndex section to dist.ini (Scimon #52, #53)
+  - Use git ls-files to find pm files (#54)
+
+0.1.8  2018-05-07T22:37:44+09:00
+  - Restrict to concrete versions only (ugexe #46)
+
+0.1.7  2018-04-21T16:36:23+02:00
+  - Document about --keep option (lizmat #41)
+  - Fix version requirement in META6.json (niner #43)
+
+0.1.6  2018-03-25T13:39:04+09:00
+  - Set auth cpan:AUTHOR (titsuki #37, #38)
+
+0.1.5  2018-03-17T09:02:46+09:00
+  - Clean dist after releasing (melezhik #31)
+
+0.1.4  2018-03-14T21:48:32+09:00
+  - Check version in BumpVersion (drforr #36)
+
+0.1.3  2018-03-13T07:32:45+09:00
+  - Bump versions for grammar and roles too (drforr #33, #34)
+
+0.1.2  2018-01-09T03:20:10+09:00
+  - Add `mi6 version` command
+  - Die when tests failed
+
+0.1.1  2018-01-09T01:49:08+09:00
+  - Fix description for release
+
+0.1.0  2018-01-09T01:43:25+09:00
+  - Add a "true" release command (#29)

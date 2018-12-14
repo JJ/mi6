@@ -2,14 +2,15 @@ use v6;
 use App::Mi6::Template;
 use App::Mi6::JSON;
 use App::Mi6::INI;
-use File::Find;
-use Shell::Command;
+use App::Mi6::Release;
 use CPAN::Uploader::Tiny;
+use Shell::Command;
 
-unit class App::Mi6:ver<0.0.7>;
+unit class App::Mi6:ver<0.2.3>:auth<cpan:SKAJI>;
 
 has $!author = run(<git config --global user.name>,  :out).out.slurp(:close).chomp;
 has $!email  = run(<git config --global user.email>, :out).out.slurp(:close).chomp;
+has $!cpanid = $*HOME.add('.pause').e ?? CPAN::Uploader::Tiny.read-config($*HOME.add('.pause'))<user> !! Nil;
 has $!year   = Date.today.year;
 
 my $normalize-path = -> $path {
@@ -41,11 +42,12 @@ multi method cmd('new', $module is copy) {
     my $module-dir = $module-file.IO.dirname.Str;
     mkpath($_) for $module-dir, "t", "bin";
     my %content = App::Mi6::Template::template(
-        :$module, :$!author, :$!email, :$!year,
+        :$module, :$!author, :$!cpanid, :$!email, :$!year,
         :$module-file,
         dist => $module.subst("::", "-", :g),
     );
     my %map = <<
+        Changes      Changes
         dist.ini     dist
         $module-file module
         t/01-basic.t test
@@ -56,8 +58,9 @@ multi method cmd('new', $module is copy) {
     for %map.kv -> $f, $c {
         spurt($f, %content{$c});
     }
-    self.cmd("build");
     run "git", "init", ".", :!out;
+    run "git", "add", ".";
+    self.cmd("build");
     run "git", "add", ".";
     note "Successfully created $main-dir";
 }
@@ -69,29 +72,18 @@ multi method cmd('build') {
     build();
 }
 
-multi method cmd('test', @file, Bool :$verbose, Int :$jobs) {
+multi method cmd('test', *@file, Bool :$verbose, Int :$jobs) {
     self.cmd('build');
     my $exitcode = test(@file, :$verbose, :$jobs);
-    exit $exitcode;
+    $exitcode;
 }
 
-multi method cmd('release') {
-    self.cmd('build');
-    my ($module, $module-file) = guess-main-module();
-    my ($user, $repo) = guess-user-and-repo();
-    die "Cannot find user and repository setting" unless $repo;
-    my $meta-file = <META6.json META.info>.grep({.IO ~~ :f & :!l})[0];
-    print "\n" ~ qq:to/EOF/ ~ "\n";
-      Are you ready to release your module? Congrats!
-      For this, follow these steps:
-
-      1. Fork https://github.com/perl6/ecosystem repository.
-      2. Add https://raw.githubusercontent.com/$user/$repo/master/$meta-file to META.list.
-      3. And raise a pull request!
-
-      Once your pull request is merged, we can install your module by:
-      \$ zef install $module
-    EOF
+multi method cmd('release', Bool :$keep) {
+    my ($main-module, $main-module-file) = guess-main-module();
+    my $dist = $main-module.subst("::", "-", :g);
+    my $release-date = DateTime.now.truncated-to('second').Str;
+    my $release = App::Mi6::Release.new;
+    $release.run(dir => "lib", app => self, :$main-module, :$main-module-file, :$release-date, :$dist, :$keep);
 }
 
 multi method cmd('dist') {
@@ -100,32 +92,6 @@ multi method cmd('dist') {
     my $tarball = self.make-dist-tarball($module);
     say "Created $tarball";
     return $tarball;
-}
-
-multi method cmd('upload') {
-    my $tarball = self.cmd('dist');
-    my @line = run("git", "status", "-s", :out).out.lines(:close);
-    if @line.elems != 0 {
-        note "You need to commit the following files before uploading $tarball";
-        note "";
-        note " * $_" for @line.map({s/\s*\S+\s+//; $_});
-        note "";
-        note "If you want to ignore these files, then list them in .gitignore or MANIFEST.SKIP";
-        note "";
-        die;
-    }
-    my $config = $*HOME.add: ".pause";
-    die "To upload tarball to CPAN, you need to prepare $config first\n" unless $config.IO.e;
-    my $client = CPAN::Uploader::Tiny.new-from-config($config);
-    $*OUT.print("Are you sure to upload $tarball to CPAN? (y/N) ");
-    $*OUT.flush;
-    my $line = $*IN.get;
-    if $line !~~ rx:i/^y/ {
-        $*OUT.print("Abort.\n");
-        return;
-    }
-    $client.upload($tarball, subdirectory => "Perl6");
-    say "Successfully uploaded $tarball to CPAN.";
 }
 
 sub withp6lib(&code) {
@@ -155,7 +121,7 @@ sub test(@file, Bool :$verbose, Int :$jobs) {
         note "==> Set PERL6LIB=%*ENV<PERL6LIB>";
         note "==> @command[]";
         my $proc = run |@command;
-        $proc.exitcode;
+        die "Test failed" unless ?$proc;
     };
 }
 
@@ -198,10 +164,17 @@ method regenerate-meta-info($module, $module-file) {
     $perl = "6.c" if $perl eq "v6";
     $perl ~~ s/^v//;
 
-    my @cmd = $*EXECUTABLE, "-M$module", "-e", "$module.^ver.Str.say";
-    my $p = withp6lib { run |@cmd, :out, :!err };
-    my $version = $p.out.slurp(:close).chomp || $already<version>;
-    $version = "0.0.1" if $version eq "*";
+    my $version = do {
+        my @cmd = $*EXECUTABLE, "-M$module", "-e", "$module.^ver.Str.say";
+        my $p = withp6lib { run |@cmd, :out, :!err };
+        my $v = $p.out.slurp(:close).chomp || $already<version>;
+        $v eq "*" ?? "0.0.1" !! $v;
+    };
+    my $auth = do {
+        my @cmd = $*EXECUTABLE, "-M$module", "-e", "$module.^auth.Str.say";
+        my $p = withp6lib { run |@cmd, :out, :!err };
+        $p.out.slurp(:close).chomp || $already<auth> || Nil;
+    };
 
     my %new-meta =
         name          => $module,
@@ -211,13 +184,14 @@ method regenerate-meta-info($module, $module-file) {
         test-depends  => $already<test-depends> || [],
         build-depends => $already<build-depends> || [],
         description   => find-description($module-file) || $already<description> || "",
-        provides      => find-provides(),
+        provides      => self.find-provides(),
         source-url    => $already<source-url> || find-source-url(),
         version       => $version,
         resources     => $already<resources> || [],
         tags          => $already<tags> || [],
         license       => $already<license> || guess-license(),
     ;
+    %new-meta<auth> = $auth if $auth;
     for $already.keys -> $k {
         %new-meta{$k} = $already{$k} unless %new-meta{$k}:exists;
     }
@@ -252,8 +226,8 @@ method prune-files {
     my @prune = (
         * eq ".travis.yml",
         * eq ".gitignore",
-        * eq "approvar.yml",
-        * eq ".approvar.yml",
+        * eq "appveyor.yml",
+        * eq ".appveyor.yml",
         * eq "circle.yml",
         * ~~ rx/\.precomp/,
     );
@@ -281,8 +255,8 @@ method make-dist-tarball($main-module) {
     my $name = $main-module.subst("::", "-", :g);
     my $meta = App::Mi6::JSON.decode("META6.json".IO.slurp);
     my $version = $meta<version>;
-    die "To make dist tarball, you must specify version (not '*') in META6.json first"
-        if $version eq '*';
+    die "To make dist tarball, you must specify a concrete version (no '*' or '+') in META6.json first"
+        if $version.contains('*') or $version.ends-with('+');
     $name ~= "-$version";
     rm_rf $name if $name.IO.d;
     unlink "$name.tar.gz" if "$name.tar.gz".IO.e;
@@ -343,11 +317,27 @@ sub guess-user-and-repo() {
     }
 }
 
-sub find-provides() {
-    my %provides = find(dir => "lib", name => /\.pm6?$/).list.map(-> $file {
-        my $module = $to-module($file.Str);
-        $module => $normalize-path($file.Str);
-    }).sort;
+method find-provides() {
+    my @no-index;
+    my $config = config('MetaNoIndex');
+    if $config {
+        for @($config) {
+            my ($k, $v) = $_.kv;
+            if $k eq 'file' || $k eq 'filename' {
+                @no-index.push: $v;
+            } else {
+                die "Unsupported key 'MetaNoIndex.$k' is found in dist.ini";
+            }
+        }
+    }
+    my @prune = self.prune-files;
+    my %provides = run("git", "ls-files", "lib", :out).out.lines(:close).grep(/\.pm6?$/)\
+        .grep(-> $file { !so @prune.grep({$_($file)}) })\
+        .grep(-> $file { !so @no-index.grep({ $_ eq $file }) })\
+        .map(-> $file {
+            my $module = $to-module($file.Str);
+            $module => $normalize-path($file.Str);
+        }).sort;
     %provides;
 }
 
@@ -358,7 +348,7 @@ sub guess-main-module() {
         $file = "$file.pm6".IO.e ?? "$file.pm6" !! "$file.pm".IO.e ?? "$file.pm" !! "";
         return ($to-module($file), $file) if $file;
     }
-    my @module-files = find(dir => "lib", name => /.pm6?$/).list;
+    my @module-files = run("git", "ls-files", "lib", :out).out.lines(:close).grep(/\.pm6?$/);
     my $num = @module-files.elems;
     given $num {
         when 0 {
@@ -398,7 +388,7 @@ App::Mi6 - minimal authoring tool for Perl6
   > mi6 new Foo::Bar # create Foo-Bar distribution
   > mi6 build        # build the distribution and re-generate README.md/META6.json
   > mi6 test         # run tests
-  > mi6 upload       # upload distribution tarball to CPAN
+  > mi6 release      # release your distribution to CPAN
 
 =head1 INSTALLATION
 
@@ -414,18 +404,20 @@ App::Mi6 is a minimal authoring tool for Perl6. Features are:
 
 =item Run tests by C<mi6 test>
 
+=item Release your distribution tarball to CPAN
+
 =head1 FAQ
 
 =head2 Can I customize mi6 behavior?
 
-Use C<dist.ini>:
+Yes. Use C<dist.ini>:
 
     ; dist.ini
     name = Your-Module-Name
 
     [ReadmeFromPod]
     ; if you want to disable generating README.md from main module's pod, then:
-    ; disable = true
+    ; enable = false
     ;
     ; if you want to change a file that generates README.md, then:
     ; filename = lib/Your/Tutorial.pod
@@ -437,17 +429,42 @@ Use C<dist.ini>:
     ; you can use Perl6 regular expressions
     ; match = ^ 'xt/'
 
+    [MetaNoIndex]
+    ; if you do not want to list some files in META6.json as "provides", then
+    ; filename = lib/Should/Not/List/Provides.pm6
+
 =head2 How can I manage depends, build-depends, test-depends?
 
 Write them to META6.json directly :)
 
-=head2 Where is Changes file?
-
-TODO
-
 =head2 Where is the spec of META6.json?
 
 http://design.perl6.org/S22.html
+
+See also L<The Meta spec, Distribution, and CompUnit::Repository explained-ish|https://perl6advent.wordpress.com/2016/12/16/day-16-the-meta-spec-distribution-and-compunitrepository-explained-ish/> by ugexe.
+
+=head2 What is the format of the .pause file?
+
+Mi6 uses the .pause file in your home directory to determine the username.
+This is a flat text file, designed to be compatible with the .pause file used
+by the Perl5 C<cpan-upload> module (L<<https://metacpan.org/pod/cpan-upload>>).
+Note that this file only needs to contain the "user" and "password" directives.
+Unknown directives are ignored.
+
+An example file could consist of only two lines:
+
+    user your_pause_username
+    password your_pause_password
+
+Replace C<your_pause_username> with your PAUSE username, and replace
+C<your_pause_password> with your PAUSE password.
+
+This file can also be encrypted with GPG
+if you do not want to leave your PAUSE credentials in plain text.
+
+=head1 TODO
+
+documentation
 
 =head1 SEE ALSO
 
